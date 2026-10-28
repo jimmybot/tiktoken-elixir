@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {elixir: '1.15', otp: '26'}
+          - {elixir: '1.20', otp: '29'}
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt, clippy
+      - run: mix deps.get --check-locked
+      - run: mix test
+      - id: version
+        run: echo "version=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs)" >> "$GITHUB_OUTPUT"
+      - name: Check formatting and Rust warnings
+        if: matrix.elixir == '1.20'
+        run: |
+          mix format --check-formatted
+          cargo fmt --manifest-path native/tiktoken/Cargo.toml -- --check
+          cargo clippy --manifest-path native/tiktoken/Cargo.toml --locked -- -D warnings
+      - name: Build a precompiled NIF for the consumer check
+        if: matrix.elixir == '1.20'
+        id: nif
+        uses: philss/rustler-precompiled-action@v1.1.5
+        with:
+          project-name: tiktoken
+          project-version: ${{ steps.version.outputs.version }}
+          target: x86_64-unknown-linux-gnu
+          nif-version: '2.16'
+          project-dir: native/tiktoken
+          cargo-args: --locked
+      - name: Verify the packaged precompiled installation
+        if: matrix.elixir == '1.20'
+        env:
+          NIF_ARCHIVE: ${{ steps.nif.outputs.file-path }}
+        run: |
+          mkdir -p artifacts release
+          cp "$NIF_ARCHIVE" artifacts/
+          mix run scripts/checksums.exs --only-local artifacts
+          mix hex.build --output release/tiktoken.tar
+          bash scripts/smoke_test.sh release/tiktoken.tar artifacts

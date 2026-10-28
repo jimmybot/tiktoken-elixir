@@ -1,20 +1,23 @@
-# NIF for Elixir.Tiktoken
+# Native tokenizer bindings
 
-## To build the NIF module:
+This crate implements `Elixir.Tiktoken.Native` with Rustler and tiktoken-rs. Rustler
+registers the functions marked `#[rustler::nif]`; the Elixir stubs live in
+`lib/tiktoken/native.ex`.
 
-- Your NIF will now build along with your project.
+From the repository root, `mix test` compiles and loads the library. Source builds
+require Rust 1.91 or newer and a platform linker. Python and PyO3 are not used.
 
-## To load the NIF:
-
-```elixir
-defmodule Tiktoken do
-  use Rustler, otp_app: :tiktoken, crate: "tiktoken"
-
-  # When your NIF is loaded, it will override this function.
-  def add(_a, _b), do: :erlang.nif_error(:nif_not_loaded)
-end
+```sh
+cargo fmt --manifest-path native/tiktoken/Cargo.toml
+cargo clippy --manifest-path native/tiktoken/Cargo.toml --locked -- -D warnings
 ```
 
-## Examples
+The default feature selects NIF ABI 2.15. Release builds also enable
+`nif_version_2_16` to produce ABI 2.16 archives; the available ABI versions must
+match `lib/tiktoken/native.ex` and the release workflow. ABI 2.17 and 2.18 can be
+selected for custom builds. Rustler no longer uses `RUSTLER_NIF_VERSION`.
 
-[This](https://github.com/rusterlium/NifIo) is a complete example of a NIF written in Rust.
+Encoding instances use upstream singleton constructors and are shared across NIF
+calls. CPU work runs on dirty CPU schedulers. Fallible encoding, counting, and
+decoding operations map Rust errors to Elixir `{:error, reason}` tuples. Unknown
+context-window metadata maps to `nil`.

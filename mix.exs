@@ -1,21 +1,21 @@
 defmodule Tiktoken.MixProject do
   use Mix.Project
 
-  @version "0.4.2"
-  @url "https://github.com/connorjacobsen/tiktoken-elixir"
+  @version "0.5.0"
+  @url "https://github.com/jimmybot/tiktoken-elixir"
 
   def project do
     [
       app: :tiktoken,
       version: @version,
-      elixir: "~> 1.13",
+      elixir: "~> 1.15",
       description: "Elixir bindings for Tiktoken tokenizer",
       source_url: @url,
       homepage_url: @url,
       start_permanent: Mix.env() == :prod,
       package: package(),
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       deps: deps(),
-      licenses: licenses(),
       aliases: aliases()
     ]
   end
@@ -30,19 +30,18 @@ defmodule Tiktoken.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:ex_doc, "~> 0.27", only: :dev, runtime: false},
-      {:rustler, "~> 0.36.0"},
-      {:rustler_precompiled, "~> 0.8"}
+      {:ex_doc, "~> 0.40.4", only: :dev, runtime: false},
+      {:rustler, "~> 0.38.0", optional: true},
+      {:rustler_precompiled, "~> 0.10.1"}
     ]
   end
 
-  defp licenses, do: ~w(MIT)
-
   defp package do
     [
-      files: ~w(lib .formatter.exs mix.exs README* LICENSE* native checksum-*.exs),
+      files:
+        ~w(lib .formatter.exs mix.exs README* CHANGELOG.md LICENSE* native/tiktoken/.cargo native/tiktoken/src native/tiktoken/Cargo.* native/tiktoken/README.md checksum-*.exs),
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/connorjacobsen/tiktoken-elixir"}
+      links: %{"GitHub" => @url}
     ]
   end
 

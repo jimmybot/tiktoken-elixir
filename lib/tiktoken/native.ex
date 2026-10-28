@@ -8,7 +8,8 @@ defmodule Tiktoken.Native do
     otp_app: :tiktoken,
     crate: "tiktoken",
     base_url: "#{url}/releases/download/v#{version}",
-    version: version
+    version: version,
+    nif_versions: ["2.15", "2.16"]
 
   def encoding_for_model(_model), do: err()
 
@@ -41,6 +42,12 @@ defmodule Tiktoken.Native do
   def o200k_encode_with_special_tokens(_input), do: err()
   def o200k_decode(_ids), do: err()
   def o200k_count_tokens(_input, _allowed_special), do: err()
+
+  def o200k_harmony_encode_ordinary(_input), do: err()
+  def o200k_harmony_encode(_input, _allowed_special), do: err()
+  def o200k_harmony_encode_with_special_tokens(_input), do: err()
+  def o200k_harmony_decode(_ids), do: err()
+  def o200k_harmony_count_tokens(_input, _allowed_special), do: err()
 
   def context_size_for_model(_model), do: err()
 

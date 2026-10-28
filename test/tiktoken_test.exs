@@ -3,6 +3,13 @@ defmodule TiktokenTest do
   doctest Tiktoken
 
   @known_models [
+    # current model families
+    {"gpt-5", Tiktoken.O200K, 400_000},
+    {"gpt-5.4", Tiktoken.O200K, 1_050_000},
+    {"gpt-4.1", Tiktoken.O200K, 1_047_576},
+    {"gpt-4o", Tiktoken.O200K, 128_000},
+    {"o3", Tiktoken.O200K, 200_000},
+    {"gpt-oss-20b", Tiktoken.O200KHarmony, 131_072},
     # chat
     {"gpt-3.5-turbo", Tiktoken.CL100K, 16_385},
     {"gpt-3.5-turbo-0125", Tiktoken.CL100K, 16_385},
@@ -23,7 +30,7 @@ defmodule TiktokenTest do
     # text
     {"text-davinci-003", Tiktoken.P50K, 4_097},
     {"text-davinci-002", Tiktoken.P50K, 4_097},
-    {"text-davinci-001", Tiktoken.R50K, 4_096},
+    {"text-davinci-001", Tiktoken.R50K, nil},
     {"text-curie-001", Tiktoken.R50K, 2_049},
     {"text-babbage-001", Tiktoken.R50K, 2_049},
     {"text-ada-001", Tiktoken.R50K, 2_049},
@@ -33,29 +40,29 @@ defmodule TiktokenTest do
     {"ada", Tiktoken.R50K, 2_049},
     # code
     {"code-davinci-002", Tiktoken.P50K, 8_001},
-    {"code-davinci-001", Tiktoken.P50K, 4_096},
-    {"code-cushman-002", Tiktoken.P50K, 4_096},
+    {"code-davinci-001", Tiktoken.P50K, nil},
+    {"code-cushman-002", Tiktoken.P50K, nil},
     {"code-cushman-001", Tiktoken.P50K, 2_048},
     {"davinci-codex", Tiktoken.P50K, 2_049},
-    {"cushman-codex", Tiktoken.P50K, 4_096},
+    {"cushman-codex", Tiktoken.P50K, nil},
     # edit
-    {"text-davinci-edit-001", Tiktoken.P50KEdit, 4_096},
-    {"code-davinci-edit-001", Tiktoken.P50KEdit, 4_096},
+    {"text-davinci-edit-001", Tiktoken.P50KEdit, nil},
+    {"code-davinci-edit-001", Tiktoken.P50KEdit, nil},
     # embeddings
     # {"text-embedding-3-large", Tiktoken.CL100K},
     # {"text-embedding-3-small", Tiktoken.CL100K},
     {"text-embedding-ada-002", Tiktoken.CL100K, 8_192},
     # old embeddings
-    {"text-similarity-davinci-001", Tiktoken.R50K, 4_096},
-    {"text-similarity-curie-001", Tiktoken.R50K, 4_096},
-    {"text-similarity-babbage-001", Tiktoken.R50K, 4_096},
-    {"text-similarity-ada-001", Tiktoken.R50K, 4_096},
-    {"text-search-davinci-doc-001", Tiktoken.R50K, 4_096},
-    {"text-search-curie-doc-001", Tiktoken.R50K, 4_096},
-    {"text-search-babbage-doc-001", Tiktoken.R50K, 4_096},
-    {"text-search-ada-doc-001", Tiktoken.R50K, 4_096},
-    {"code-search-babbage-code-001", Tiktoken.R50K, 4_096},
-    {"code-search-ada-code-001", Tiktoken.R50K, 4_096}
+    {"text-similarity-davinci-001", Tiktoken.R50K, nil},
+    {"text-similarity-curie-001", Tiktoken.R50K, nil},
+    {"text-similarity-babbage-001", Tiktoken.R50K, nil},
+    {"text-similarity-ada-001", Tiktoken.R50K, nil},
+    {"text-search-davinci-doc-001", Tiktoken.R50K, nil},
+    {"text-search-curie-doc-001", Tiktoken.R50K, nil},
+    {"text-search-babbage-doc-001", Tiktoken.R50K, nil},
+    {"text-search-ada-doc-001", Tiktoken.R50K, nil},
+    {"code-search-babbage-code-001", Tiktoken.R50K, nil},
+    {"code-search-ada-code-001", Tiktoken.R50K, nil}
     # moderation
     # {"text-moderation-latest", Tiktoken.CL100K},
     # {"text-moderation-stable", Tiktoken.CL100K},
@@ -149,12 +156,25 @@ defmodule TiktokenTest do
                Tiktoken.count_tokens("gpt2", "Hello")
     end
 
-    test "with special tokens" do
-      text = "Tell me more about Elixir!"
-      special_tokens = ["<|endoftext|>"]
-      assert {:ok, count} = Tiktoken.count_tokens("gpt-3.5-turbo", text, special_tokens)
-      assert count > 0
-      assert count == length(elem(Tiktoken.encode("gpt-3.5-turbo", text, special_tokens), 1))
+    test "with special tokens across encodings" do
+      text = "<|endoftext|>"
+
+      models = [
+        {"davinci", 50_256},
+        {"text-davinci-003", 50_256},
+        {"text-davinci-edit-001", 50_256},
+        {"gpt-3.5-turbo", 100_257},
+        {"gpt-5", 199_999},
+        {"gpt-oss-20b", 199_999}
+      ]
+
+      for {model, token_id} <- models do
+        assert {:ok, [^token_id]} = Tiktoken.encode(model, text, [text])
+        assert {:ok, [^token_id]} = Tiktoken.encode_with_special_tokens(model, text)
+        assert {:ok, 1} = Tiktoken.count_tokens(model, text, [text])
+        assert {:ok, ordinary} = Tiktoken.encode_ordinary(model, text)
+        assert length(ordinary) > 1
+      end
     end
 
     test "with different models" do
@@ -169,6 +189,27 @@ defmodule TiktokenTest do
     end
   end
 
+  test "Harmony protocol tokens and Unicode round-trip through the model API" do
+    text = "<|start|>世界 👋<|end|>"
+    assert {:ok, [200_006 | _] = ids} = Tiktoken.encode_with_special_tokens("gpt-oss-20b", text)
+    assert List.last(ids) == 200_007
+    assert {:ok, ^text} = Tiktoken.decode("gpt-oss-20b", ids)
+  end
+
+  test "invalid token IDs return errors across encodings" do
+    for model <- [
+          "davinci",
+          "text-davinci-003",
+          "text-davinci-edit-001",
+          "gpt-3.5-turbo",
+          "gpt-5",
+          "gpt-oss-20b"
+        ] do
+      assert {:error, reason} = Tiktoken.decode(model, [4_294_967_295])
+      assert is_binary(reason)
+    end
+  end
+
   describe "context_size_for_model/1" do
     test "get proper context size for model" do
       @known_models
@@ -177,8 +218,8 @@ defmodule TiktokenTest do
       end)
     end
 
-    test "get 4096 for unknown model" do
-      assert Tiktoken.context_size_for_model("unknown") == 4_096
+    test "get nil for unknown model" do
+      assert is_nil(Tiktoken.context_size_for_model("unknown"))
     end
   end
 end

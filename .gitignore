@@ -25,7 +25,7 @@ tiktoken-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-checksum-*
-tiktoken-*
+/artifacts/
+/release/
 
-priv/native/libtiktoken.so
+/priv/native/

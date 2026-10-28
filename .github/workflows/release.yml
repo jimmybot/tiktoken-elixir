@@ -2,67 +2,123 @@ name: Build precompiled NIFs
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - '*'
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build_release:
-    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs)
+          test -n "$version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [ci, version]
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
       matrix:
-        nif: ["2.16", "2.15"]
+        nif: ['2.15', '2.16']
         job:
-          - { target: arm-unknown-linux-gnueabihf , os: ubuntu-22.04 , use-cross: true }
-          - { target: aarch64-unknown-linux-gnu   , os: ubuntu-22.04 , use-cross: true }
-          - { target: aarch64-unknown-linux-musl  , os: ubuntu-22.04 , use-cross: true }
-          - { target: aarch64-apple-darwin        , os: macos-15      }
-          - { target: riscv64gc-unknown-linux-gnu , os: ubuntu-22.04 , use-cross: true }
-          - { target: x86_64-apple-darwin         , os: macos-15      }
-          - { target: x86_64-unknown-linux-gnu    , os: ubuntu-22.04  }
-          - { target: x86_64-unknown-linux-musl   , os: ubuntu-22.04 , use-cross: true }
-          - { target: x86_64-pc-windows-gnu       , os: windows-2022  }
-          - { target: x86_64-pc-windows-msvc      , os: windows-2022  }
-
+          - {target: arm-unknown-linux-gnueabihf, os: ubuntu-22.04, use-cross: true}
+          - {target: aarch64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true}
+          - {target: aarch64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true}
+          - {target: aarch64-apple-darwin, os: macos-15}
+          - {target: riscv64gc-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true}
+          - {target: x86_64-apple-darwin, os: macos-15}
+          - {target: x86_64-unknown-linux-gnu, os: ubuntu-22.04}
+          - {target: x86_64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true}
+          - {target: x86_64-pc-windows-gnu, os: windows-2022}
+          - {target: x86_64-pc-windows-msvc, os: windows-2022}
     steps:
-    - name: Checkout source code
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          targets: ${{ matrix.job.target }}
+      - name: Build archive
+        id: nif
+        uses: philss/rustler-precompiled-action@v1.1.5
+        with:
+          project-name: tiktoken
+          project-version: ${{ needs.version.outputs.version }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross }}
+          cross-version: from-source
+          project-dir: native/tiktoken
+          cargo-args: --locked
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.nif.outputs.file-name }}
+          path: ${{ steps.nif.outputs.file-path }}
+          if-no-files-found: error
 
-    - name: Extract project version
-      shell: bash
-      run: |
-        # Get the project version from mix.exs
-        echo "PROJECT_VERSION=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs | head -n1)" >> $GITHUB_ENV
+  package:
+    needs: [build, version]
+    runs-on: ubuntu-22.04
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.20'
+          otp-version: '29'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+      - run: mix deps.get --check-locked
+      - name: Generate all checksums and build the Hex package
+        run: |
+          mix run scripts/checksums.exs artifacts
+          mkdir -p release
+          mix hex.build --output release/tiktoken-${{ needs.version.outputs.version }}.tar
+          cp checksum-Elixir.Tiktoken.Native.exs release/
+      - name: Verify the packaged precompiled installation
+        run: bash scripts/smoke_test.sh release/tiktoken-${{ needs.version.outputs.version }}.tar artifacts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package
+          path: release/*
+          if-no-files-found: error
 
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: stable
-        target: ${{ matrix.job.target }}
-
-    - name: Build the project
-      id: build-crate
-      uses: philss/rustler-precompiled-action@v1.1.4
-      with:
-        project-name: tiktoken
-        project-version: ${{ env.PROJECT_VERSION }}
-        target: ${{ matrix.job.target }}
-        nif-version: ${{ matrix.nif }}
-        use-cross: ${{ matrix.job.use-cross }}
-        project-dir: "native/tiktoken"
-
-    - name: Artifact upload
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ steps.build-crate.outputs.file-name }}
-        path: ${{ steps.build-crate.outputs.file-path }}
-
-    - name: Publish archives and packages
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          ${{ steps.build-crate.outputs.file-path }}
-      if: startsWith(github.ref, 'refs/tags/')
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [package]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.tar
+            artifacts/checksum-*.exs
